@@ -12,7 +12,7 @@ enum AppTab: String, CaseIterable {
 enum RootAlert: Identifiable {
     case cameraUnavailable
     case duplicates(Int)
-    case cutoutFailed
+    case cutoutFailed(String)
 
     var id: String {
         switch self {
@@ -26,7 +26,7 @@ enum RootAlert: Identifiable {
 /// 统一用一个 sheet 承载整个添加流程，避免多个 sheet 相互冲突导致“点了没反应”
 enum RootSheet: Identifiable {
     case destination
-    case manualCutout(UIImage)
+    case manualCutout(original: UIImage, aiCutout: UIImage?)
     case category([UIImage])
     case calendarDate([UIImage])
     case itemInfo(images: [UIImage], category: String)
@@ -40,6 +40,12 @@ enum RootSheet: Identifiable {
         case .itemInfo: return "itemInfo"
         }
     }
+}
+
+/// 待人工矫正的图：AI 抠图结果（若有）作为起点，用户在此基础上用保留笔/擦除笔修正
+private struct PendingCutout {
+    let original: UIImage
+    let aiCutout: UIImage?
 }
 
 /// 底部菜单栏（4 tab）+ 中间「＋」统一添加
@@ -57,8 +63,9 @@ struct RootTabView: View {
     @State private var addToOutfit = false
     @State private var addToCalendar = false
     @State private var readyCutouts: [UIImage] = []
-    @State private var pendingManual: [UIImage] = []
+    @State private var pendingManual: [PendingCutout] = []
     @State private var rootSheet: RootSheet?
+    @State private var shouldProcessDestination = false
     @State private var duplicates: [(new: Photo, existing: Photo)] = []
     @State private var activeAlert: RootAlert?
     @State private var isCutting = false
@@ -98,20 +105,30 @@ struct RootTabView: View {
             guard !items.isEmpty else { return }
             loadPickedItems(items)
         }
-        .fullScreenCover(item: $rootSheet) { sheet in
+        .fullScreenCover(item: $rootSheet, onDismiss: {
+            // 弹层彻底关闭后再处理，避免 dismiss 与状态改动冲突导致弹层卡住
+            if shouldProcessDestination {
+                shouldProcessDestination = false
+                processDestination()
+            }
+        }) { sheet in
             switch sheet {
             case .destination:
-                DestinationSheet(addToMaterial: $addToMaterial, addToOutfit: $addToOutfit, addToCalendar: $addToCalendar) {
-                    processDestination()
-                }
-            case .manualCutout(let img):
-                ManualCutoutView(image: img,
+                DestinationSheet(addToMaterial: $addToMaterial, addToOutfit: $addToOutfit, addToCalendar: $addToCalendar,
+                                 onCancel: { rootSheet = nil },
+                                 onConfirm: {
+                                     shouldProcessDestination = true
+                                     rootSheet = nil
+                                 })
+            case .manualCutout(let original, let aiCutout):
+                ManualCutoutView(image: original,
+                                 initialCutout: aiCutout,
                                  onDone: { cutout in
                                      readyCutouts.append(cutout)
                                      continueOutfitFlow()
                                  },
                                  onUseOriginal: {
-                                     readyCutouts.append(img)
+                                     readyCutouts.append(original)
                                      continueOutfitFlow()
                                  })
             case .category(let images):
@@ -153,9 +170,9 @@ struct RootTabView: View {
                     },
                     secondaryButton: .cancel(Text("保留")) { duplicates = [] }
                 )
-            case .cutoutFailed:
-                return Alert(title: Text("抠图失败"),
-                             message: Text("没能识别出主体，请换背景干净、主体清晰的照片"),
+            case .cutoutFailed(let msg):
+                return Alert(title: Text("AI 抠图失败"),
+                             message: Text(msg),
                              dismissButton: .default(Text("好")))
             }
         }
@@ -181,6 +198,7 @@ struct RootTabView: View {
 
     private func processDestination() {
         let images = pickedImages
+        print("🟢 processDestination：\(images.count) 张，material=\(addToMaterial) outfit=\(addToOutfit) calendar=\(addToCalendar)")
         pickedImages = []
 
         if addToMaterial {
@@ -197,13 +215,18 @@ struct RootTabView: View {
 
         if addToOutfit {
             // 后台异步抠图：不阻塞主线程，期间显示 Loading
+            print("🟢 开始 AI 抠图")
             isCutting = true
             Task { @MainActor in
-                let (successes, failures) = await cutOutBackgrounds(images)
+                let (pending, error) = await cutOutBackgrounds(images)
+                print("🟢 AI 抠图结束，共 \(pending.count) 张，错误=\(error ?? "无")")
                 isCutting = false
-                readyCutouts = successes
-                pendingManual = failures
+                readyCutouts = []
+                pendingManual = pending
                 selectedTab = .outfit   // 抠图完成后跳转穿搭页
+                if let error {
+                    activeAlert = .cutoutFailed(error)
+                }
                 continueOutfitFlow()
             }
         } else if addToMaterial {
@@ -216,18 +239,23 @@ struct RootTabView: View {
         }
     }
 
-    /// 后台抠图：成功进衣橱，失败自动降级进手动抠像
-    private func cutOutBackgrounds(_ images: [UIImage]) async -> (successes: [UIImage], failures: [UIImage]) {
-        var successes: [UIImage] = []
-        var failures: [UIImage] = []
+    /// 后台抠图：本地 withoutBG 优先 → 本地 Vision 兜底；返回待人工矫正列表 + 首个错误
+    private func cutOutBackgrounds(_ images: [UIImage]) async -> (pending: [PendingCutout], error: String?) {
+        var pending: [PendingCutout] = []
+        var firstError: String?
         for image in images {
-            if let cutout = await BackgroundRemover.removeBackground(from: image) {
-                successes.append(cutout)
-            } else {
-                failures.append(image)
+            var aiCutout: UIImage?
+            var error: String?
+            (aiCutout, error) = await LocalCutout.removeBackground(from: image)
+            if aiCutout == nil {
+                aiCutout = await BackgroundRemover.removeBackground(from: image)
             }
+            if aiCutout == nil, firstError == nil, let error {
+                firstError = error
+            }
+            pending.append(PendingCutout(original: image, aiCutout: aiCutout))
         }
-        return (successes, failures)
+        return (pending, firstError)
     }
 
     private func continueOutfitFlow() {
@@ -236,7 +264,8 @@ struct RootTabView: View {
             if pendingManual.isEmpty {
                 rootSheet = .category(readyCutouts)
             } else {
-                rootSheet = .manualCutout(pendingManual.removeFirst())
+                let next = pendingManual.removeFirst()
+                rootSheet = .manualCutout(original: next.original, aiCutout: next.aiCutout)
             }
         }
     }
@@ -326,8 +355,8 @@ struct DestinationSheet: View {
     @Binding var addToMaterial: Bool
     @Binding var addToOutfit: Bool
     @Binding var addToCalendar: Bool
+    var onCancel: () -> Void
     var onConfirm: () -> Void
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ZStack {
@@ -340,12 +369,11 @@ struct DestinationSheet: View {
                 checkboxRow("加入搭配（衣橱）", isOn: $addToOutfit)
                 checkboxRow("加入日历", isOn: $addToCalendar)
                 HStack(spacing: 16) {
-                    Button("取消") { dismiss() }
+                    Button("取消") { onCancel() }
                         .foregroundColor(AppTheme.secondaryText)
                         .padding(.vertical, 8)
                         .padding(.horizontal, 16)
                     Button("确定") {
-                        dismiss()
                         onConfirm()
                     }
                     .disabled(!addToMaterial && !addToOutfit && !addToCalendar)

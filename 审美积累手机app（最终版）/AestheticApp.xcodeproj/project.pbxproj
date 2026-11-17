@@ -180,6 +180,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AestheticApp/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "用于拍摄并保存你的审美灵感图片";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用于获取当地天气";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "用于语音输入审美笔记";
@@ -208,6 +209,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AestheticApp/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "用于拍摄并保存你的审美灵感图片";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用于获取当地天气";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "用于语音输入审美笔记";

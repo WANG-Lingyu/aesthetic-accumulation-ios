@@ -10,6 +10,8 @@ struct Stroke: Identifiable {
 /// 手动抠像（全屏页面）：默认整图保留，擦除笔涂成透明，保留笔恢复；实时红色蒙版预览
 struct ManualCutoutView: View {
     let image: UIImage
+    /// AI 抠图结果（透明图）；提供时以其 alpha 作为起点，用户在此基础上矫正
+    var initialCutout: UIImage? = nil
     var onDone: (UIImage) -> Void
     var onUseOriginal: () -> Void
     @Environment(\.dismiss) private var dismiss
@@ -21,6 +23,8 @@ struct ManualCutoutView: View {
     @State private var fittedSize: CGSize = .zero
     @State private var isPreviewing = false
     @State private var basePreview: UIImage?
+    /// AI 抠图的 alpha 转成的初始蒙版（白=保留，黑=擦除）
+    @State private var initialMask: UIImage?
 
     var body: some View {
         NavigationStack {
@@ -63,11 +67,13 @@ struct ManualCutoutView: View {
                     .onAppear {
                         fittedSize = fitted.size
                         basePreview = downscale(image, to: fitted.size)
+                        initialMask = makeInitialMask(from: initialCutout, at: fitted.size)
                     }
                     .onChange(of: geo.size) { _, newSize in
                         let f = fittedRect(imageSize: image.size, in: newSize).size
                         fittedSize = f
                         basePreview = downscale(image, to: f)
+                        initialMask = makeInitialMask(from: initialCutout, at: f)
                     }
                 }
 
@@ -116,8 +122,13 @@ struct ManualCutoutView: View {
     private func renderMask() -> UIImage {
         let renderer = UIGraphicsImageRenderer(size: fittedSize)
         return renderer.image { ctx in
-            UIColor.black.setFill()
-            ctx.fill(CGRect(origin: .zero, size: fittedSize))
+            // 有 AI 初始蒙版则以其为底（AI 保留=白、AI 擦除=黑），否则默认全黑（全部擦除）
+            if let initialMask {
+                initialMask.draw(in: CGRect(origin: .zero, size: fittedSize))
+            } else {
+                UIColor.black.setFill()
+                ctx.fill(CGRect(origin: .zero, size: fittedSize))
+            }
             for stroke in allStrokes {
                 guard let first = stroke.points.first else { continue }
                 let path = UIBezierPath()
@@ -136,6 +147,23 @@ struct ManualCutoutView: View {
         UIGraphicsImageRenderer(size: size).image { ctx in
             img.draw(in: CGRect(origin: .zero, size: size))
         }
+    }
+
+    /// 把 AI 抠图结果的 alpha 通道转成灰度蒙版（白=不透明=保留，黑=透明=擦除），并缩放到显示尺寸
+    private func makeInitialMask(from cutout: UIImage?, at size: CGSize) -> UIImage? {
+        guard let cutout, let cg = cutout.cgImage, size.width > 0, size.height > 0 else { return nil }
+        let ci = CIImage(cgImage: cg)
+        // 把 alpha 复制到 RGB：白=不透明，黑=透明
+        let colored = ci.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+            "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+            "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1)
+        ])
+        let context = CIContext()
+        guard let outCG = context.createCGImage(colored, from: ci.extent) else { return nil }
+        return downscale(UIImage(cgImage: outCG), to: size)
     }
 
     // MARK: - 实时预览（保留=原图，擦除=红色蒙版）
