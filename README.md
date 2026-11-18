@@ -79,6 +79,7 @@
 ---
 
 ## 安装与运行
+项目包含两套独立版本：原生 iOS App（下面方式一/二/三）、PWA 网页版（HTTPS，Safari添加到主屏幕）
 
 ### 环境要求
 
@@ -86,7 +87,8 @@
 - iOS 17.0+ 的 iPhone / 模拟器
 - 依赖说明：无外部第三方依赖，全部基于苹果原生系统框架：SwiftUI、Vision、CoreImage、Speech、CoreLocation、Charts
 
-### 方式一：让 AI 自己安装（最简单）
+### 原生 iOS App
+#### 方式一：让 AI 自己安装（最简单）
 
 打开 Claude Code / 其他 AI 编码工具，粘贴：
 
@@ -97,7 +99,7 @@
 3. 确认能编译通过并启动
 ```
 
-### 方式二：命令行编译校验
+#### 方式二：命令行编译校验
 
 ```bash
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
@@ -105,7 +107,7 @@ swift build -Xswiftc "-sdk" -Xswiftc "$(xcrun --sdk iphonesimulator --show-sdk-p
   -Xswiftc "-target" -Xswiftc "arm64-apple-ios17.0-simulator"
 ```
 
-### 方式三：Xcode 运行
+#### 方式三：Xcode 运行
 
 1. 用 Xcode 打开项目根目录的 `Package.swift`（或 `AestheticApp.xcodeproj`）
 2. 选择一台 iPhone 模拟器
@@ -113,10 +115,21 @@ swift build -Xswiftc "-sdk" -Xswiftc "$(xcrun --sdk iphonesimulator --show-sdk-p
 
 > 也可用仓库自带的脚本一键装进模拟器并启动：`./scripts/run_sim.sh`（脚本会自动查找 iPhone 16 模拟器、组装 .app、安装并启动）。
 
-### 配置大模型（可选，用于智能检索/视觉打标签）
+#### 配置大模型（可选，用于智能检索/视觉打标签）
 
 本地 Vision 能力开箱即用；若想启用大模型意图解析、语义检索和视觉打标签，在 Xcode 的 **Product → Scheme → Edit Scheme → Run → Arguments → Environment Variables** 中设置（详见「配置说明」章节）。
 
+### PWA 网页版（HTTPS，Safari 添加到主屏幕）
+
+源码路径：`web/`，基于 MediaPipe 实现本地抠图，和原生 App 代码相互独立，能力有差异。
+
+1. 将整个 `web/` 目录部署到支持 HTTPS 的静态托管平台（推荐 GitHub Pages / Vercel，自带 HTTPS）
+2. 在 iPhone 上使用 Safari 打开部署后的 HTTPS 链接（Chrome 不支持独立 PWA 窗口）
+3. 点击 Safari 底部分享按钮，下滑选择「添加到主屏幕」
+4. 返回桌面，点击图标即可独立打开，无浏览器地址栏
+
+> 
+> 限制：网页环境权限弱于原生 App，相机、相册、存储受浏览器安全策略约束，主打抠图、素材预览能力，不包含原生 App 全部功能。
 ---
 
 ## 使用方法
