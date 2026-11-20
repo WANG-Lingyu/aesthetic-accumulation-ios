@@ -3,8 +3,6 @@
 
 🎬 [实操演示视频（UserGuide.MOV）](https://github.com/WANG-Lingyu/aesthetic-accumulation-ios/releases/tag/v1.0)
 
-[![Demo 封面](video/cover.png)](https://github.com/WANG-Lingyu/aesthetic-accumulation-ios/releases/tag/v1.0)
-
 
 > 一句话摘要：一款本地优先的iPhone穿搭审美素材App，解决灵感图散在相册、难以检索标注、无法自由拼搭穿搭的痛点，支持素材管理、AI抠图搭配、穿搭日历与审美数据复盘。
 
